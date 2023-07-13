@@ -8,25 +8,25 @@ import (
 	"syscall"
 
 	"github.com/moolen/neuwerk/pkg/controller"
+	integr "github.com/moolen/neuwerk/pkg/integration"
 	"github.com/moolen/neuwerk/pkg/log"
+	"github.com/moolen/neuwerk/pkg/ruleset"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 var (
-	logger                  = log.DefaultLogger
-	dnsListenAddr           string
-	dnsUpstreamAddr         string
-	verbosity               int
-	bpffs                   string
-	peers                   []string
-	deviceName              string
-	dbBindAddr              string
-	dbBindPort              int
-	memberListBindAddr      string
-	memberListBindPort      int
-	memberListAdvertiseAddr string
-	memberListAdvertisePort int
+	logger              = log.DefaultLogger
+	integration         string
+	configFile          string
+	dnsListenHostPort   string
+	dnsUpstreamHostPort string
+	verbosity           int
+	bpffs               string
+	peers               []string
+	deviceName          string
+	dbBindPort          int
+	mgmtPort            int
 )
 
 var rootCmd = &cobra.Command{
@@ -38,26 +38,38 @@ var rootCmd = &cobra.Command{
 		ctx := SetupSignalHandler()
 		logger.Info("starting neuwerk")
 
-		ctrl, err := controller.New(ctx, &controller.ControllerConfig{
-			BPFFS:                   bpffs,
-			DeviceName:              deviceName,
-			DNSListenAddress:        dnsListenAddr,
-			DNSUpstreamAddress:      dnsUpstreamAddr,
-			Peers:                   peers,
-			DBBindAddr:              dbBindAddr,
-			DBBindPort:              dbBindPort,
-			MemberListBindAddr:      memberListBindAddr,
-			MemberListBindPort:      memberListBindPort,
-			MemberListAdvertiseAddr: memberListAdvertiseAddr,
-			MemberListAdvertisePort: memberListAdvertisePort,
-		})
+		fileWatcher, err := ruleset.NewFileWatcher(configFile)
+		if err != nil {
+			logger.Error(err, "unable to create file watcher", "file", configFile)
+			os.Exit(1)
+		}
+
+		ctrlConfig := &controller.ControllerConfig{
+			Integration:         integration,
+			BPFFS:               bpffs,
+			DeviceName:          deviceName,
+			DNSListenHostPort:   dnsListenHostPort,
+			DNSUpstreamHostPort: dnsUpstreamHostPort,
+			Peers:               peers,
+			DBBindPort:          dbBindPort,
+			MgmtPort:            mgmtPort,
+			RuleProvider:        fileWatcher,
+		}
+
+		// integration may change controller config
+		err = integr.Apply(ctx, integration, ctrlConfig)
+		if err != nil {
+			logger.Error(err, "unable to apply aws integration")
+			os.Exit(1)
+		}
+
+		ctrl, err := controller.New(ctx, ctrlConfig)
 		if err != nil {
 			logger.Error(err, "unable to create controller")
 			os.Exit(1)
 		}
 		defer ctrl.Close()
 
-		logger.Info("waiting for stop ctx")
 		<-ctx.Done()
 		logger.Info("shutting down")
 	},
@@ -95,19 +107,16 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().IntVarP(&verbosity, "verbosity", "v", 3, "verbosity level to use")
-	rootCmd.Flags().StringVar(&dnsListenAddr, "dns-listen-addr", "0.0.0.0:3333", "dnsproxy listen address")
-	rootCmd.Flags().StringVar(&dnsUpstreamAddr, "dns-upstream-addr", "8.8.8.8:53", "trusted upstream DNS server address")
+	rootCmd.PersistentFlags().IntVarP(&verbosity, "verbosity", "v", 1, "verbosity level to use")
+	rootCmd.Flags().StringVar(&integration, "integration", "aws", "integration type to use")
+	rootCmd.Flags().StringVar(&configFile, "config", "config.yaml", "config file to use")
+	rootCmd.Flags().StringVar(&dnsListenHostPort, "dns-listen-host-port", "0.0.0.0:53", "dnsproxy listen address")
+	rootCmd.Flags().StringVar(&dnsUpstreamHostPort, "dns-upstream-host-port", "8.8.8.8:53", "trusted upstream DNS server address")
 	rootCmd.Flags().StringVar(&bpffs, "bpffs", "/sys/fs/bpf", "bpf file system location")
 	rootCmd.Flags().StringArrayVar(&peers, "peers", nil, "state cluster peers")
 	rootCmd.Flags().StringVar(&deviceName, "net-device", "wlp61s0", "name of the network device to attach the tc filter to")
-	rootCmd.Flags().StringVar(&dbBindAddr, "db-bind-addr", "0.0.0.0", "db address to listen on")
 	rootCmd.Flags().IntVar(&dbBindPort, "db-bind-port", 3320, "db port to listen on")
-	rootCmd.Flags().StringVar(&memberListBindAddr, "memberlist-bind-addr", "0.0.0.0", "memberlist address to listen on")
-	rootCmd.Flags().IntVar(&memberListBindPort, "memberlist-bind-port", 3322, "memberlist port to listen on")
-	rootCmd.Flags().StringVar(&memberListAdvertiseAddr, "memberlist-advertise-addr", "0.0.0.0", "memberlist address to advertise")
-	rootCmd.Flags().IntVar(&memberListAdvertisePort, "memberlist-advertise-port", 3322, "memberlist port to advertise")
-
+	rootCmd.Flags().IntVar(&mgmtPort, "mgmt-bind-port", 3322, "mgmt port to listen on")
 }
 
 // initConfig reads in config file and ENV variables if set.
