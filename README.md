@@ -9,12 +9,14 @@
 ## TODO
 
 HA
-- [x] glob hostnames: fan-out messaging
+- [x] glob hostnames: distribute state to other nodes
 - [x] reconstruct bpf maps from distributed cache
 - [ ] config lifecycle management: create / update / remove networks
+    - [x] garbage collect old IPs
 - [ ] FQDN hostnames: pre-warm + background updates
 - [ ] support CIDR allowlist
-- [ ] integration tests
+- [x] integration tests
+- [x] cloud integration
 - [ ] load tests
 
 ## Configuration Proposal

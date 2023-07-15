@@ -1,1 +1,9 @@
-.vagrant
+bin/
+**/*.tfvars
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+.terraform.lock.hcl
+.terraform.tfstate.*
+e2e/e2e.test
+tf/modules/neuwerk/leader-election/zipped_artifacts
