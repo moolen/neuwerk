@@ -3003,6 +3003,22 @@ static long (*bpf_sk_assign)(void *ctx, void *sk, __u64 flags) = (void *) 124;
 static __u64 (*bpf_ktime_get_boot_ns)(void) = (void *) 125;
 
 /*
+ * bpf_ktime_get_tai_ns
+ *
+ * 	A nonsettable system-wide clock derived from wall-clock time but
+ * 	ignoring leap seconds.  This clock does not experience
+ * 	discontinuities and backwards jumps caused by NTP inserting leap
+ * 	seconds as CLOCK_REALTIME does.
+ *
+ * 	See: **clock_gettime**\ (**CLOCK_TAI**)
+ *
+ * Returns
+ * 	Current *ktime*.
+ */
+static __u64 (*bpf_ktime_get_tai_ns)(void) = (void *) 208;
+
+
+/*
  * bpf_seq_printf
  *
  * 	**bpf_seq_printf**\ () uses seq_file **seq_printf**\ () to print

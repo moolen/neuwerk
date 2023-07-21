@@ -3,12 +3,15 @@ package bpf
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/cilium/ebpf"
 	"github.com/moolen/neuwerk/pkg/log"
+	"github.com/moolen/neuwerk/pkg/util"
 	"github.com/vishvananda/netlink"
 )
 
@@ -18,6 +21,7 @@ type Collection struct {
 	NetworkCIDRs    *ebpf.Map
 	NetworkPolicies *ebpf.Map
 	PolicyConfigMap *ebpf.Map
+	PktTrack        *ebpf.Map
 
 	deviceName string
 }
@@ -32,7 +36,7 @@ var (
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -type policy_key -type network_cidr bpf ./c/ingress.c -- -I./c/headers
-func Load(bpffs string) (*Collection, error) {
+func Load(bpffs, ingressDeviceName, vipAddr, dnsListenHostPort string) (*Collection, error) {
 	pinPath := filepath.Join(bpffs, BPFMountDir)
 	logger.Info("loading bpf", "pin-path", pinPath)
 	err := os.MkdirAll(pinPath, os.ModePerm)
@@ -45,6 +49,12 @@ func Load(bpffs string) (*Collection, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	err = rewriteConstants(spec, ingressDeviceName, vipAddr, dnsListenHostPort)
+	if err != nil {
+		return nil, err
+	}
+
 	err = spec.LoadAndAssign(&objs.bpfMaps, &ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{
 			PinPath: pinPath,
@@ -73,13 +83,47 @@ func Load(bpffs string) (*Collection, error) {
 		IngressProg:     objs.bpfPrograms.Ingress,
 		NetworkCIDRs:    objs.bpfMaps.NetworkCidrs,
 		NetworkPolicies: objs.bpfMaps.NetworkPolicies,
+		PktTrack:        objs.bpfMaps.PktTrack,
+		deviceName:      ingressDeviceName,
 	}, nil
 }
 
-func (coll *Collection) Attach(deviceName string) error {
-	logger.Info("attaching to device", "device", deviceName)
-	coll.deviceName = deviceName
-	err := attachProgram(deviceName, coll.IngressProg, netlink.HANDLE_MIN_INGRESS)
+// rewrites constants in bpf spec to store static data
+// see `static volatile const` in `ingress.c`
+func rewriteConstants(spec *ebpf.CollectionSpec, ingressDeviceName, vipAddr, dnsListenHostPort string) error {
+	// get ingress device index
+	nl, err := netlink.LinkByName(ingressDeviceName)
+	if err != nil {
+		return err
+	}
+	idx := uint32(nl.Attrs().Index)
+
+	// get ingress address
+	ingAddr := net.ParseIP(vipAddr)
+	if err != nil {
+		return fmt.Errorf("unable to parse ingress addr %s", vipAddr)
+	}
+
+	// get dns listen port
+	_, dnsPortStr, err := net.SplitHostPort(dnsListenHostPort)
+	if err != nil {
+		return err
+	}
+	dnsPort, err := strconv.Atoi(dnsPortStr)
+	if err != nil {
+		return err
+	}
+
+	return spec.RewriteConstants(map[string]interface{}{
+		"net_redir_device": idx,
+		"ingress_addr":     util.IPToUint(ingAddr),
+		"dns_listen_port":  util.ToNetBytes16(uint16(dnsPort)),
+	})
+}
+
+func (coll *Collection) Attach() error {
+	logger.Info("attaching to device", "device", coll.deviceName)
+	err := attachProgram(coll.deviceName, coll.IngressProg, netlink.HANDLE_MIN_INGRESS)
 	if err != nil {
 		return err
 	}

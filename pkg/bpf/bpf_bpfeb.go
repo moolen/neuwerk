@@ -74,6 +74,7 @@ type bpfProgramSpecs struct {
 type bpfMapSpecs struct {
 	NetworkCidrs    *ebpf.MapSpec `ebpf:"network_cidrs"`
 	NetworkPolicies *ebpf.MapSpec `ebpf:"network_policies"`
+	PktTrack        *ebpf.MapSpec `ebpf:"pkt_track"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -97,12 +98,14 @@ func (o *bpfObjects) Close() error {
 type bpfMaps struct {
 	NetworkCidrs    *ebpf.Map `ebpf:"network_cidrs"`
 	NetworkPolicies *ebpf.Map `ebpf:"network_policies"`
+	PktTrack        *ebpf.Map `ebpf:"pkt_track"`
 }
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
 		m.NetworkCidrs,
 		m.NetworkPolicies,
+		m.PktTrack,
 	)
 }
 
