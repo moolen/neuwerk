@@ -30,15 +30,17 @@ type ObservePayload struct {
 type ObserveFunc func(*ObservePayload)
 
 func New(
-	listenAddr string,
+	listenHostPort string,
 	upstreamSDNServer string,
 	dnsCache cache.Cache,
 	allowedFunc AllowedFunc,
 	observeFunc ObserveFunc) (*DNSProxy, error) {
-	logger.Info("creating dnsproxy server", "listen", listenAddr)
-	pc, err := net.ListenUDP("udp", net.UDPAddrFromAddrPort(netip.MustParseAddrPort(
-		listenAddr,
-	)))
+	addrPort, err := netip.ParseAddrPort(listenHostPort)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("creating dnsproxy server", "addrPort", addrPort.String())
+	pc, err := net.ListenUDP("udp", net.UDPAddrFromAddrPort(addrPort))
 	if err != nil {
 		return nil, err
 	}
@@ -49,9 +51,10 @@ func New(
 		observeFunc:       observeFunc,
 	}
 
+	// TODO: implement tcp server
 	p.UDPServer = &dns.Server{
 		PacketConn: pc,
-		Addr:       listenAddr,
+		Addr:       listenHostPort,
 		Net:        "udp",
 		Handler:    p,
 	}
@@ -65,7 +68,7 @@ func (p *DNSProxy) ServeDNS(w dns.ResponseWriter, msg *dns.Msg) {
 		logger.Error(err, "unable to split source host/port")
 		return
 	}
-	logger.Info("processing dns query", "client", host, "msg", msg)
+	logger.Info("processing dns query", "client", w.RemoteAddr().String(), "msg", msg, "localAddr", w.LocalAddr().String())
 
 	hostAddr := net.ParseIP(host)
 	for _, q := range msg.Question {
