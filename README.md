@@ -1,5 +1,17 @@
 # NEUWERK
 
+## Rationale
+
+This is a cloud-native network egress firewall.
+
+Requirements:
+
+- no change of existing applications needed
+- runs as a central infrastructure on the network level to provide strong isolation
+- provides dynamic, DNS-based firewall to allow/deny egress traffic
+
+Please also see [moolen/skouter](https://github.com/moolen/skouter) as a counter draft to this traditional, central approach.
+
 ## Overview
 
 ![Architecture](./assets/architecture.png)
@@ -8,7 +20,6 @@
 
 ## TODO
 
-HA
 - [x] glob hostnames: distribute state to other nodes
 - [x] reconstruct bpf maps from distributed cache
 - [ ] config lifecycle management: create / update / remove networks
@@ -17,7 +28,18 @@ HA
 - [ ] support CIDR allowlist
 - [x] integration tests
 - [x] cloud integration
-- [ ] load tests
+- [ ] metrics: map sizes, histograms for: dns queries, map reconcile duration, gc time
+- [ ] load and scale tests
+- [ ] Configuration API (for terraform or other means)
+    - [ ] GRPC/Rest
+    - [ ] host/network discovery mechanism (k8s?)
+- [ ] consider integration with NLB for DNS load balancing
+- [ ] multi-az deployment
+- [ ] audit mode
+- [ ] AWS GWLB integration (NAT?!)
+- [ ] software upgrade & maintenance automation
+
+
 
 ## Configuration Proposal
 
@@ -67,15 +89,32 @@ serviceDiscovery:
         ports: [443]
 ```
 
-Starting the application
+### Trying it out
+
+place your public key into a file `variables.tfvars`:
+
 ```
-$ vagrant up
-$ vagrant ssh proxy1
-$ /vagrant/bin/neuwerk \
-  --net-device eth1 \
-  --peers 192.168.56.5:3322 \
-  --peers 192.168.56.6:3322 \
-  --memberlist-bind-addr 192.168.56.4 \
-  --memberlist-advertise-addr 192.168.56.4 \
-  --db-bind-addr 192.168.56.4
+ssh_pubkey = "ssh-rsa ....."
+```
+
+Then run & apply
+```
+$ cd tf/
+$ make apply
+$ make deploy SSH_KEY_PRIVATE=~/.ssh/my-private-key.pem
+$ make run SSH_KEY_PRIVATE=~/.ssh/my-private-key.pem
+```
+That will open a `tmux` session with 5 windows: 3 `neuwerk` instances, a `testbox` and a local shell.
+
+Start neuwerk with the following commands on each node:
+```
+$ sudo sed -i s/127.0.0.53/10.0.0.2/g /etc/resolv.conf
+$ sudo systemctl stop systemd-resolved
+$ sudo ./neuwerk
+```
+
+Then switch to the `testbox` node and run the e2e tests:
+
+```
+$ sudo ./e2e.test
 ```
