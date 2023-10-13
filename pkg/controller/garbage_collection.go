@@ -9,7 +9,9 @@ import (
 	"github.com/buraksezer/olric"
 	"github.com/cilium/ebpf"
 	"github.com/moolen/neuwerk/pkg/bpf"
+	"github.com/moolen/neuwerk/pkg/metrics"
 	"github.com/moolen/neuwerk/pkg/util"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func (c *Controller) startGCLoop() {
@@ -65,6 +67,14 @@ func (c *Controller) startGCLoop() {
 // and emits a event via pubsub to inform other members to
 // delete the entry as well
 func (c *Controller) gcOlricMaps(keepaliveWindow time.Duration) error {
+	start := time.Now()
+	resultCode := metrics.ResultCodeError
+	defer func() {
+		metrics.GCStaleDistributedState.With(prometheus.Labels{
+			metrics.ResultLabel: resultCode,
+		}).Observe(time.Since(start).Seconds())
+	}()
+
 	// first: get map of static IPs which should not be touched
 	staticAddr := map[string]struct{}{}
 	rs := c.ruleProvider.Get()
@@ -127,7 +137,7 @@ func (c *Controller) gcOlricMaps(keepaliveWindow time.Duration) error {
 			}
 		}
 	}
-
+	resultCode = metrics.ResultCodeOK
 	return nil
 }
 

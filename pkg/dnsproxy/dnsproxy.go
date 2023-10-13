@@ -8,6 +8,8 @@ import (
 	"github.com/miekg/dns"
 	"github.com/moolen/neuwerk/pkg/cache"
 	"github.com/moolen/neuwerk/pkg/log"
+	"github.com/moolen/neuwerk/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type DNSProxy struct {
@@ -63,6 +65,14 @@ func New(
 }
 
 func (p *DNSProxy) ServeDNS(w dns.ResponseWriter, msg *dns.Msg) {
+	resultCode := metrics.ResultCodeError
+	start := time.Now()
+	defer func() {
+		metrics.DNSRequestDuration.With(prometheus.Labels{
+			metrics.ResultLabel: resultCode,
+		}).Observe(float64(time.Since(start).Seconds()))
+	}()
+
 	host, _, err := net.SplitHostPort(w.RemoteAddr().String())
 	if err != nil {
 		logger.Error(err, "unable to split source host/port")
@@ -74,6 +84,7 @@ func (p *DNSProxy) ServeDNS(w dns.ResponseWriter, msg *dns.Msg) {
 	for _, q := range msg.Question {
 		if !p.allowedFunc(hostAddr.To4(), q.Name) {
 			logger.V(1).Info("rejecting traffic based on policy", "hostname", q.Name)
+			metrics.RejectedDNSQueryCount.With(prometheus.Labels{}).Inc()
 			cpy := &dns.Msg{}
 			cpy.SetRcode(msg, dns.RcodeNameError)
 			w.WriteMsg(cpy)
@@ -108,11 +119,23 @@ func (p *DNSProxy) ServeDNS(w dns.ResponseWriter, msg *dns.Msg) {
 	if err != nil {
 		logger.Error(err, "unable to write msg to downstream connection")
 	}
+	resultCode = metrics.ResultCodeOK
 }
 
 func (p *DNSProxy) LookupWithCache(msg *dns.Msg) (*dns.Msg, error) {
 	// TODO: lookup & update cache
-	return p.Lookup(msg)
+	resultCode := metrics.ResultCodeOK
+	start := time.Now()
+	defer func() {
+		metrics.DNSUpstreamDuration.With(prometheus.Labels{
+			metrics.ResultLabel: resultCode,
+		}).Observe(float64(time.Since(start).Seconds()))
+	}()
+	res, err := p.Lookup(msg)
+	if err != nil {
+		resultCode = metrics.ResultCodeError
+	}
+	return res, err
 }
 
 func (p *DNSProxy) Lookup(msg *dns.Msg) (*dns.Msg, error) {

@@ -17,8 +17,10 @@ import (
 	"github.com/moolen/neuwerk/pkg/cache/memory"
 	"github.com/moolen/neuwerk/pkg/dnsproxy"
 	"github.com/moolen/neuwerk/pkg/log"
+	"github.com/moolen/neuwerk/pkg/metrics"
 	"github.com/moolen/neuwerk/pkg/ruleset"
 	"github.com/moolen/neuwerk/pkg/util"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var (
@@ -172,13 +174,13 @@ func New(ctx context.Context, opts *ControllerConfig) (*Controller, error) {
 }
 
 func (c *Controller) observeDNS(op *dnsproxy.ObservePayload) {
-	// only publish this OP if this is the first time we see it
 	key := getOPKey(op)
 	res, err := c.resolvedHosts.Get(context.Background(), key)
 	if err != nil && !errors.Is(err, olric.ErrKeyNotFound) {
 		logger.Error(err, "unable to lookup resolved hosts")
 		return
 	}
+	// only publish this OP if this is the first time we see it
 	if res != nil {
 		logger.Info("skipping known address")
 		return
@@ -255,6 +257,13 @@ var InnerPolicyMap = &ebpf.MapSpec{
 }
 
 func (c *Controller) reconcileMaps() error {
+	start := time.Now()
+	resultCode := metrics.ResultCodeError
+	defer func() {
+		metrics.BPFReconcileMapsDuration.With(prometheus.Labels{
+			metrics.ResultLabel: resultCode,
+		}).Observe(time.Since(start).Seconds())
+	}()
 	logger.Info("reconciling maps")
 	for i := 0; i < MaxNetworks; i++ {
 		if i < len(c.ruleProvider.Get().Networks) {
@@ -339,6 +348,7 @@ func (c *Controller) reconcileMaps() error {
 		}
 	}
 
+	resultCode = metrics.ResultCodeOK
 	return nil
 }
 

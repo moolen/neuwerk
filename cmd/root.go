@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +12,8 @@ import (
 	integr "github.com/moolen/neuwerk/pkg/integration"
 	"github.com/moolen/neuwerk/pkg/log"
 	"github.com/moolen/neuwerk/pkg/ruleset"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -69,6 +72,14 @@ var rootCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		defer ctrl.Close()
+
+		http.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
+		go func() {
+			err := http.ListenAndServe(":3000", nil)
+			if err != nil {
+				logger.Error(err, "unable to listen http")
+			}
+		}()
 
 		<-ctx.Done()
 		logger.Info("shutting down")
