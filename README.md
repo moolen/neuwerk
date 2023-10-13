@@ -28,7 +28,7 @@ Please also see [moolen/skouter](https://github.com/moolen/skouter) as a counter
 - [ ] support CIDR allowlist
 - [x] integration tests
 - [x] cloud integration
-- [ ] metrics: map sizes, histograms for: dns queries, map reconcile duration, gc time
+- [x] metrics: map sizes, histograms for: dns queries, map reconcile duration, gc time
 - [ ] load and scale tests
 - [ ] Configuration API (for terraform or other means)
     - [ ] GRPC/Rest
