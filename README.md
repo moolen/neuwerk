@@ -106,10 +106,14 @@ $ make run SSH_KEY_PRIVATE=~/.ssh/my-private-key.pem
 ```
 That will open a `tmux` session with 5 windows: 3 `neuwerk` instances, a `testbox` and a local shell.
 
-Start neuwerk with the following commands on each node:
+Prepare the node with the following commands on each node:
 ```
-$ sudo sed -i s/127.0.0.53/10.0.0.2/g /etc/resolv.conf
-$ sudo systemctl stop systemd-resolved
+sudo sed -i s/127.0.0.53/10.0.0.2/g /etc/resolv.conf
+sudo systemctl stop systemd-resolved
+```
+
+Then start the app:
+```
 $ sudo ./neuwerk
 ```
 

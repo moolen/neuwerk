@@ -1,6 +1,9 @@
 apply:
 	terraform apply -var-file variables.tfvars -auto-approve
 
+destroy:
+	terraform destroy -var-file variables.tfvars -auto-approve
+
 deploy:
 	$(MAKE) -C ../ build
 	./deploy.sh $(SSH_KEY_PRIVATE)
