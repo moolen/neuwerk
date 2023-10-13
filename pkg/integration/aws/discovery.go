@@ -62,7 +62,6 @@ var logger = log.DefaultLogger
 // 1. discover peers by listing instances from the sam ASG
 // 2. discover if this instance is a leader
 // 3. disable the src/dst check on the ingress interfaces
-// 4. assign a vrrp router id to this instance
 //
 // Note: please refer to tf/ directory to see how it is supposed to be set up.
 func Apply(ctx context.Context, ctrlConfig *controller.ControllerConfig) error {

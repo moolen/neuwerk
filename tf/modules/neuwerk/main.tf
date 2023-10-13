@@ -160,6 +160,15 @@ resource "aws_security_group" "neuwerk_mgmt" {
   }
 
   ingress {
+    description = "cluster port"
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    # security_groups = [aws_security_group.neuwerk-identity.id]
+    cidr_blocks = [var.vpc_cidr] # TODO
+  }
+
+  ingress {
     description = "dns tcp port"
     from_port   = 53
     to_port     = 53
