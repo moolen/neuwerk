@@ -1,9 +1,18 @@
 networks:
-  - name: "aws_subnet"
+  - name: "neuwerk_subnet"
     cidr: 10.0.7.0/24
     policies:
-      - ip: 10.0.7.224
-        ports: [22]
+      - hostname: "*.x.pipedream.net"
+        ports: [443]
+      - hostname: form3.tech
+        ports: [443]
+      - hostname: example.com
+        ports: [443]
+      - hostname: github.com
+        ports: [443]
+  - name: "apps_subnet"
+    cidr: 10.7.0.0/16
+    policies:
       - hostname: "*.x.pipedream.net"
         ports: [443]
       - hostname: form3.tech

@@ -1,109 +1,3 @@
-locals {
-  ssh_key_name              = "neuwerk-ssh-key"
-  vip                       = cidrsubnet(var.mgmt_subnet_cidrs[0], 8, 133)
-}
-
-module "bastion" {
-  source                = "./bastion"
-  vpc_id                = var.vpc_id
-  subnet_id             = var.bastion_subnet_ids[0]
-  ssh_key_name          = local.ssh_key_name
-  bastion_instance_type = "t2.micro"
-  cidr_block            = "0.0.0.0/0"
-  bastion_name          = "neuwerk-bastion"
-}
-
-module "leader-election" {
-  source = "./leader-election"
-
-  name            = "neuwerk-asg-leader-election"
-  asg_name_prefix = "neuwerk"
-}
-
-resource "aws_ec2_subnet_cidr_reservation" "neuwerk_vip" {
-  cidr_block       = local.vip
-  reservation_type = "explicit"
-  subnet_id        = var.mgmt_subnet_ids[0]
-}
-
-
-module "asg" {
-  source  = "terraform-aws-modules/autoscaling/aws"
-  version = "~> 6.10"
-
-
-  name = "neuwerk"
-
-  min_size            = 1
-  max_size            = 3
-  desired_capacity    = 3
-  health_check_type   = "EC2"
-  vpc_zone_identifier = var.mgmt_subnet_ids
-
-  # Launch template
-  launch_template_name        = "neuwerk-asg"
-  launch_template_description = "Neuwerk launch template"
-  update_default_version      = true
-
-  # user_data = <<EOF
-  #     #cloud-config
-  #     runcmd:
-  #         - sed -i s/127.0.0.53/10.0.0.2/g /etc/resolv.conf
-  #         - systemctl stop systemd-resolved
-  # EOF
-
-  image_id      = data.aws_ami.ubuntu.id
-  instance_type = "t3.medium"
-  key_name      = local.ssh_key_name
-
-  # IAM role & instance profile
-  create_iam_instance_profile = true
-  iam_role_name               = "neuwerk-instance-profile"
-  iam_role_description        = "IAM instance profile for neuwerk"
-
-  iam_role_policies = {
-    neuwerk = aws_iam_policy.neuwerk-instance-profile.arn
-  }
-
-  metadata_options = {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required"
-    instance_metadata_tags      = "enabled"
-    http_put_response_hop_limit = 32
-  }
-
-  security_groups = [aws_security_group.neuwerk-identity.id]
-
-  network_interfaces = [
-    {
-      # management interface
-      delete_on_termination = true
-      description           = "management"
-      device_index          = 0
-      security_groups       = [aws_security_group.neuwerk_mgmt.id]
-    },
-    {
-      # traffic interface
-      delete_on_termination = true
-      description           = "ingress"
-      device_index          = 1
-      security_groups       = [aws_security_group.neuwerk_ingress.id]
-    }
-  ]
-  tag_specifications = [
-    {
-      resource_type = "instance"
-      tags          = { "neuwerk:vip" = local.vip }
-    }
-  ]
-}
-
-resource "aws_key_pair" "neuwerk-key" {
-  key_name   = local.ssh_key_name
-  public_key = var.ssh_pubkey
-}
-
-
 data "aws_ami" "ubuntu" {
   most_recent = true
 
@@ -124,13 +18,13 @@ data "aws_ami" "ubuntu" {
 resource "aws_security_group" "neuwerk-identity" {
   name        = "neuwerk-identity"
   description = "Neuwerk instance identity"
-  vpc_id      = var.vpc_id
+  vpc_id      = aws_vpc.main.id
 }
 
 resource "aws_security_group" "neuwerk_mgmt" {
   name        = "neuwerk_mgmt"
   description = "Neuwerk management traffic"
-  vpc_id      = var.vpc_id
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     description = "redis DB port"
@@ -173,7 +67,7 @@ resource "aws_security_group" "neuwerk_mgmt" {
     from_port   = 53
     to_port     = 53
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -181,7 +75,7 @@ resource "aws_security_group" "neuwerk_mgmt" {
     from_port   = 53
     to_port     = 53
     protocol    = "udp"
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -189,7 +83,7 @@ resource "aws_security_group" "neuwerk_mgmt" {
     from_port   = -1
     to_port     = -1
     protocol    = "icmp"
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -209,17 +103,17 @@ resource "aws_security_group" "neuwerk_mgmt" {
   }
 }
 
-resource "aws_security_group" "neuwerk_ingress" {
-  name        = "neuwerk_ingress"
+resource "aws_security_group" "neuwerk_ingress_egress" {
+  name        = "neuwerk_ingress_egress"
   description = "Neuwerk ingress traffic"
-  vpc_id      = var.vpc_id
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     description = "traffic to filter"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {

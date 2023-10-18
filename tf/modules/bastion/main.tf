@@ -28,13 +28,13 @@ resource "aws_instance" "bastion" {
   associate_public_ip_address = true
 
   tags = {
-    Name = "bastion"
+    Name = "${var.bastion_name}"
   }
 
 }
 
 resource "aws_security_group" "allow_ssh_icmp" {
-  name        = "allow_ssh_icmp"
+  name        = "${var.bastion_name}_allow_ssh_icmp"
   description = "Allow SSH and ALL ICMP IPV4 inbound traffic"
   vpc_id      = var.vpc_id
 

@@ -21,6 +21,7 @@ import (
 var (
 	logger              = log.DefaultLogger
 	integration         string
+	clusterName         string
 	configFile          string
 	dnsListenHostPort   string
 	dnsUpstreamHostPort string
@@ -48,9 +49,10 @@ var rootCmd = &cobra.Command{
 		}
 
 		ctrlConfig := &controller.ControllerConfig{
+			ClusterName:         clusterName,
 			Integration:         integration,
 			BPFFS:               bpffs,
-			DeviceName:          deviceName,
+			EgressDeviceName:    deviceName,
 			DNSListenHostPort:   dnsListenHostPort,
 			DNSUpstreamHostPort: dnsUpstreamHostPort,
 			Peers:               peers,
@@ -118,6 +120,7 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
+	rootCmd.Flags().StringVar(&clusterName, "cluster-name", "default", "name of the cluster")
 	rootCmd.PersistentFlags().IntVarP(&verbosity, "verbosity", "v", 1, "verbosity level to use")
 	rootCmd.Flags().StringVar(&integration, "integration", "aws", "integration type to use")
 	rootCmd.Flags().StringVar(&configFile, "config", "config.yaml", "config file to use")

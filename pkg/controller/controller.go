@@ -38,7 +38,6 @@ const (
 type Controller struct {
 	ctx          context.Context
 	bpffs        string
-	deviceName   string
 	coll         *bpf.Collection
 	cache        cache.Cache
 	dnsproxy     *dnsproxy.DNSProxy
@@ -47,7 +46,6 @@ type Controller struct {
 
 	mgmtAddr    string
 	ingressAddr string
-	vipAddr     string
 
 	olric                     olric.Client
 	peers                     []string
@@ -60,18 +58,22 @@ type Controller struct {
 }
 
 type ControllerConfig struct {
-	Integration         string
-	DeviceName          string
+	Integration string
+	// Name of the neuwerk cluster
+	ClusterName string
+	// Name of the target device where packets should be redirected to
+	// this is the egress device.
+	EgressDeviceName    string
+	IngressDeviceName   string
 	BPFFS               string
 	DNSListenHostPort   string
 	DNSUpstreamHostPort string
 	Peers               []string
 
-	MgmtAddr    string
-	MgmtPort    int
-	DBBindPort  int
-	IngressAddr string
-	VIPAddr     string
+	ManagementAddress string
+	MgmtPort          int
+	DBBindPort        int
+	IngressAddress    string
 
 	RuleProvider              ruleset.RuleProvider
 	CoordinatorReconcilerFunc func(ctx context.Context, isCoordinator bool) error
@@ -79,17 +81,15 @@ type ControllerConfig struct {
 
 func New(ctx context.Context, opts *ControllerConfig) (*Controller, error) {
 	var err error
-	logger.Info("applying controller options", "mgmt_addr", opts.MgmtAddr, "mgmt_port", opts.MgmtPort)
+	logger.Info("applying controller options", "mgmt_addr", opts.ManagementAddress, "mgmt_port", opts.MgmtPort)
 	c := &Controller{
 		ctx:                       ctx,
 		integration:               opts.Integration,
 		ruleProvider:              opts.RuleProvider,
-		deviceName:                opts.DeviceName,
 		bpffs:                     opts.BPFFS,
-		vipAddr:                   opts.VIPAddr,
-		mgmtAddr:                  opts.MgmtAddr,
+		mgmtAddr:                  opts.ManagementAddress,
 		mgmtPort:                  opts.MgmtPort,
-		ingressAddr:               opts.IngressAddr,
+		ingressAddr:               opts.IngressAddress,
 		peers:                     opts.Peers,
 		dbBindPort:                opts.DBBindPort,
 		coordinatorReconcilerFunc: opts.CoordinatorReconcilerFunc,
@@ -103,7 +103,7 @@ func New(ctx context.Context, opts *ControllerConfig) (*Controller, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to start coordinator: %w", err)
 	}
-	c.coll, err = bpf.Load(opts.BPFFS, opts.DeviceName, c.vipAddr, opts.DNSListenHostPort)
+	c.coll, err = bpf.Load(opts.BPFFS, opts.IngressDeviceName, opts.EgressDeviceName, c.ingressAddr, opts.DNSListenHostPort)
 	if err != nil {
 		return nil, fmt.Errorf("unable to load bpf: %w", err)
 	}

@@ -23,7 +23,7 @@ type Collection struct {
 	PolicyConfigMap *ebpf.Map
 	PktTrack        *ebpf.Map
 
-	deviceName string
+	ingressDeviceName string
 }
 
 type NetworkCIDR bpfNetworkCidr
@@ -36,7 +36,7 @@ var (
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -type policy_key -type network_cidr bpf ./c/ingress.c -- -I./c/headers
-func Load(bpffs, ingressDeviceName, vipAddr, dnsListenHostPort string) (*Collection, error) {
+func Load(bpffs, ingressDeviceName, egressDeviceName, ingressAddr, dnsListenHostPort string) (*Collection, error) {
 	pinPath := filepath.Join(bpffs, BPFMountDir)
 	logger.Info("loading bpf", "pin-path", pinPath)
 	err := os.MkdirAll(pinPath, os.ModePerm)
@@ -50,7 +50,7 @@ func Load(bpffs, ingressDeviceName, vipAddr, dnsListenHostPort string) (*Collect
 		return nil, err
 	}
 
-	err = rewriteConstants(spec, ingressDeviceName, vipAddr, dnsListenHostPort)
+	err = rewriteConstants(spec, egressDeviceName, ingressAddr, dnsListenHostPort)
 	if err != nil {
 		return nil, err
 	}
@@ -80,28 +80,29 @@ func Load(bpffs, ingressDeviceName, vipAddr, dnsListenHostPort string) (*Collect
 		return nil, err
 	}
 	return &Collection{
-		IngressProg:     objs.bpfPrograms.Ingress,
-		NetworkCIDRs:    objs.bpfMaps.NetworkCidrs,
-		NetworkPolicies: objs.bpfMaps.NetworkPolicies,
-		PktTrack:        objs.bpfMaps.PktTrack,
-		deviceName:      ingressDeviceName,
+		IngressProg:       objs.bpfPrograms.Ingress,
+		NetworkCIDRs:      objs.bpfMaps.NetworkCidrs,
+		NetworkPolicies:   objs.bpfMaps.NetworkPolicies,
+		PktTrack:          objs.bpfMaps.PktTrack,
+		ingressDeviceName: ingressDeviceName,
 	}, nil
 }
 
 // rewrites constants in bpf spec to store static data
 // see `static volatile const` in `ingress.c`
-func rewriteConstants(spec *ebpf.CollectionSpec, ingressDeviceName, vipAddr, dnsListenHostPort string) error {
+func rewriteConstants(spec *ebpf.CollectionSpec, targetRedirectDeviceName, ingressAddr, dnsListenHostPort string) error {
+	logger.Info("rewriting constants", "target-redirect-device", targetRedirectDeviceName, "vip-addr", ingressAddr, "dnslistenhostport", dnsListenHostPort)
 	// get ingress device index
-	nl, err := netlink.LinkByName(ingressDeviceName)
+	nl, err := netlink.LinkByName(targetRedirectDeviceName)
 	if err != nil {
 		return err
 	}
 	idx := uint32(nl.Attrs().Index)
 
 	// get ingress address
-	ingAddr := net.ParseIP(vipAddr)
+	ingAddr := net.ParseIP(ingressAddr)
 	if err != nil {
-		return fmt.Errorf("unable to parse ingress addr %s", vipAddr)
+		return fmt.Errorf("unable to parse ingress addr %s", ingressAddr)
 	}
 
 	// get dns listen port
@@ -122,8 +123,8 @@ func rewriteConstants(spec *ebpf.CollectionSpec, ingressDeviceName, vipAddr, dns
 }
 
 func (coll *Collection) Attach() error {
-	logger.Info("attaching to device", "device", coll.deviceName)
-	err := attachProgram(coll.deviceName, coll.IngressProg, netlink.HANDLE_MIN_INGRESS)
+	logger.Info("attaching to device", "device", coll.ingressDeviceName)
+	err := attachProgram(coll.ingressDeviceName, coll.IngressProg, netlink.HANDLE_MIN_INGRESS)
 	if err != nil {
 		return err
 	}
@@ -131,5 +132,5 @@ func (coll *Collection) Attach() error {
 }
 
 func (coll *Collection) Close() error {
-	return detachProgram(coll.deviceName, coll.IngressProg, netlink.HANDLE_MIN_INGRESS)
+	return detachProgram(coll.ingressDeviceName, coll.IngressProg, netlink.HANDLE_MIN_INGRESS)
 }

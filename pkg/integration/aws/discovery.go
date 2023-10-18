@@ -19,49 +19,43 @@ import (
 )
 
 type DiscoveryOutput struct {
+	ClusterName         string
 	InstanceID          string
 	IsLeader            bool
 	IngressInterface    NetworkInterface
 	ManagementInterface NetworkInterface
-	VIPAddress          string
-	Peers               []string
-	PeerInterfaces      []NetworkInterface
-	PeerInstances       []types.Instance
+	EgressInterface     NetworkInterface
+
+	Peers []string
 }
 
 type NetworkInterface struct {
 	DeviceName     string
-	PrimaryAddress string
 	ENIID          string
-	Description    string
-	SubnetID       string
-	SubnetCIDR     net.IPNet
+	PrimaryAddress string
 }
 
 func (n NetworkInterface) String() string {
-	return fmt.Sprintf("deviceName=%s addr=%s eniid=%s desc=%s subnet=%s", n.DeviceName, n.PrimaryAddress, n.ENIID, n.Description, n.SubnetID)
+	return fmt.Sprintf("deviceName=%s addr=%s eniid=%s", n.DeviceName, n.PrimaryAddress, n.ENIID)
 }
 
 const (
-	AWSTagNameASG           = "aws:autoscaling:groupName"
-	AWSTagNameNeuwerkLeader = "neuwerk:leader"
-	AWSTagNameNeuwerkVIP    = "neuwerk:vip"
+	AWSTagNameASG            = "aws:autoscaling:groupName"
+	AWSTagNameNeuwerkLeader  = "neuwerk:leader"
+	AWSTagNameNeuwerkVIP     = "neuwerk:vip"
+	AWSTagNameNeuwerkCluster = "neuwerk:cluster"
+	AWSTagEgress             = "neuwerk:egress"
 
 	ManagementDeviceDescription = "management"
 	IngressDeviceDescription    = "ingress"
+	EgressDeviceDescription     = "egress"
 )
 
 var logger = log.DefaultLogger
 
-// The AWS integration makes assumptions about how neuwerk is deployed:
-// 1. Neuwerk is deployed as an ASG
-// 2. One instance is selected as leader
-// 3. each instance has two ENIs with a pre-defined description for its own purpose: ingress or management
-//
 // The integration mechanism will do the following:
-// 1. discover peers by listing instances from the sam ASG
-// 2. discover if this instance is a leader
-// 3. disable the src/dst check on the ingress interfaces
+// 1. discover peers by listing EC2 instances matching well known tags
+// 2. if this is a leader: modify the ingress subnet route table and point the default route
 //
 // Note: please refer to tf/ directory to see how it is supposed to be set up.
 func Apply(ctx context.Context, ctrlConfig *controller.ControllerConfig) error {
@@ -69,114 +63,110 @@ func Apply(ctx context.Context, ctrlConfig *controller.ControllerConfig) error {
 	if err != nil {
 		return fmt.Errorf("unable to discover peers: %w", err)
 	}
+
 	logger.Info("discovered peers", "peers", discovery.Peers)
-	err = disableSrcDstCheck(ctx, discovery.IngressInterface.ENIID)
-	if err != nil {
-		return fmt.Errorf("unable to disable src/dst check: %w", err)
-	}
-	err = disableSrcDstCheck(ctx, discovery.ManagementInterface.ENIID)
-	if err != nil {
-		return fmt.Errorf("unable to disable src/dst check: %w", err)
-	}
 
-	lnk, err := netlink.LinkByName(discovery.IngressInterface.DeviceName)
-	if err != nil {
-		return err
-	}
-	logger.Info("assigning vip", "vip", discovery.VIPAddress)
-	err = netlink.AddrReplace(lnk, &netlink.Addr{
-		LinkIndex: lnk.Attrs().Index,
-		IPNet: &net.IPNet{
-			IP:   net.ParseIP(discovery.VIPAddress),
-			Mask: discovery.IngressInterface.SubnetCIDR.Mask,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("unable to assign vip: %w", err)
-	}
+	ctrlConfig.Peers = append(ctrlConfig.Peers, discovery.Peers...)
 
-	if discovery.IsLeader {
-		// check availability of peers
-		// if they're available: join them
-		// if not: bootstrap new cluster
-		var peerAvailable bool
-		for _, addr := range discovery.Peers {
-			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:3322", addr), time.Millisecond*1500)
-			if err != nil {
-				logger.Info("peer is not available", "addr", addr)
-				continue
-			}
-			conn.Close()
-			peerAvailable = true
-			break
-		}
-
-		if peerAvailable {
-			ctrlConfig.Peers = append(ctrlConfig.Peers, discovery.Peers...)
-		} else {
-			ctrlConfig.Peers = []string{}
-		}
-	} else {
-		// not leader: try to connect with peers
-		ctrlConfig.Peers = append(ctrlConfig.Peers, discovery.Peers...)
-	}
-	if discovery.IngressInterface.DeviceName != "" {
-		ctrlConfig.DeviceName = discovery.IngressInterface.DeviceName
-	}
+	ctrlConfig.IngressDeviceName = discovery.IngressInterface.DeviceName
+	ctrlConfig.EgressDeviceName = discovery.EgressInterface.DeviceName
 
 	ctrlConfig.CoordinatorReconcilerFunc = ReconcileCoordinator
-	ctrlConfig.MgmtAddr = discovery.ManagementInterface.PrimaryAddress
-	ctrlConfig.IngressAddr = discovery.IngressInterface.PrimaryAddress
-	ctrlConfig.DNSListenHostPort = discovery.VIPAddress + ":53"
-	ctrlConfig.VIPAddr = discovery.VIPAddress
+	ctrlConfig.ManagementAddress = discovery.ManagementInterface.PrimaryAddress
+	ctrlConfig.IngressAddress = discovery.IngressInterface.PrimaryAddress
+	ctrlConfig.DNSListenHostPort = discovery.IngressInterface.PrimaryAddress + ":53"
 
 	return nil
 }
 
-func disableSrcDstCheck(ctx context.Context, eniID string) error {
-	// disable src/dst check on the ingress interface.
-	// we can not do this via launch template, have to do this from the box itself
-	logger.Info("disabling src/dest check", "iface", eniID)
+func updateRouteTable(ctx context.Context, discovery *DiscoveryOutput) error {
+	logger.Info("updating route table")
 	cfg, err := GetConfig(ctx)
 	if err != nil {
 		return err
 	}
-	var falseVal bool
-	ec2c := ec2.NewFromConfig(*cfg)
-	_, err = ec2c.ModifyNetworkInterfaceAttribute(ctx, &ec2.ModifyNetworkInterfaceAttributeInput{
-		NetworkInterfaceId: &eniID,
-		SourceDestCheck: &types.AttributeBooleanValue{
-			Value: &falseVal,
+	svc := ec2.NewFromConfig(*cfg)
+	rts, err := svc.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("tag:" + AWSTagNameNeuwerkCluster),
+				Values: []string{discovery.ClusterName},
+			},
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("unable to disable src/dst check: %w", err)
-	}
-	return nil
-}
-
-func ReassignVIP(ctx context.Context, discovery *DiscoveryOutput) error {
-	cfg, err := GetConfig(ctx)
-	if err != nil {
 		return err
 	}
-	ec2c := ec2.NewFromConfig(*cfg)
-
-	_, err = ec2c.AssignPrivateIpAddresses(ctx, &ec2.AssignPrivateIpAddressesInput{
-		NetworkInterfaceId: &discovery.IngressInterface.ENIID,
-		AllowReassignment:  aws.Bool(true),
-		PrivateIpAddresses: []string{discovery.VIPAddress},
-	})
-	if err != nil {
-		return fmt.Errorf("unable to assign private ip: %w", err)
+	if len(rts.RouteTables) == 0 {
+		return fmt.Errorf("could not find neuwerk route tables")
 	}
 
+tableLoop:
+	for _, rt := range rts.RouteTables {
+		logger.Info("route table", "route table", rt.RouteTableId)
+
+		// find `ingress` route table with ingress address
+		var matchedCIDR bool
+		for _, assoc := range rt.Associations {
+			if assoc.SubnetId == nil {
+				continue
+			}
+			sn, err := svc.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{
+				SubnetIds: []string{*assoc.SubnetId},
+			})
+			if err != nil {
+				return fmt.Errorf("unable to describe subnet: %w", err)
+			}
+			for _, sn := range sn.Subnets {
+				_, ipnet, err := net.ParseCIDR(*sn.CidrBlock)
+				if err != nil {
+					return err
+				}
+				if ipnet.Contains(net.ParseIP(discovery.IngressInterface.PrimaryAddress)) {
+					matchedCIDR = true
+				}
+			}
+		}
+
+		if !matchedCIDR {
+			continue tableLoop
+		}
+
+		// catch all route must point to this ingress ENI
+		destinationCIDR := aws.String("0.0.0.0/0")
+		for _, r := range rt.Routes {
+			logger.Info("route", "route", r)
+			if *r.DestinationCidrBlock == *destinationCIDR {
+				logger.Info("reconciling route", "route", r, "dst-cidr", *destinationCIDR, "target-eni", discovery.IngressInterface.ENIID)
+				_, err := svc.ReplaceRoute(ctx, &ec2.ReplaceRouteInput{
+					RouteTableId:         rt.RouteTableId,
+					DestinationCidrBlock: destinationCIDR,
+					NetworkInterfaceId:   &discovery.IngressInterface.ENIID,
+				})
+				if err != nil {
+					return err
+				}
+				continue tableLoop
+			}
+		}
+		logger.Info("creating route", "table", rt.RouteTableId, "dst-cidr", *destinationCIDR, "target-eni", discovery.IngressInterface.ENIID)
+		_, err = svc.CreateRoute(ctx, &ec2.CreateRouteInput{
+			RouteTableId:         rt.RouteTableId,
+			DestinationCidrBlock: destinationCIDR,
+			NetworkInterfaceId:   &discovery.IngressInterface.ENIID,
+		})
+		if err != nil {
+			return fmt.Errorf("unable to create route: %w", err)
+		}
+	}
 	return nil
 }
 
 var ErrNoPriorityAssigned = errors.New("no priority set")
 
-func Discover(ctx context.Context) (*DiscoveryOutput, error) {
+func Discover(parentCtx context.Context) (*DiscoveryOutput, error) {
+	ctx, cancel := context.WithTimeout(parentCtx, time.Second*5)
+	defer cancel()
 	out := &DiscoveryOutput{}
 	cfg, err := GetConfig(ctx)
 	if err != nil {
@@ -204,6 +194,11 @@ func Discover(ctx context.Context) (*DiscoveryOutput, error) {
 		out.IsLeader = true
 	}
 
+	out.ClusterName, err = GetMetadata(ctx, *cfg, "tags/instance/"+AWSTagNameNeuwerkCluster)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get cluster name: %w", err)
+	}
+
 	out.InstanceID, err = GetMetadata(ctx, *cfg, "instance-id")
 	if err != nil {
 		return nil, err
@@ -228,19 +223,9 @@ func Discover(ctx context.Context) (*DiscoveryOutput, error) {
 	}
 
 	for _, res := range instanceOut.Reservations {
-		out.PeerInstances = append(out.PeerInstances, res.Instances...)
 		for _, ins := range res.Instances {
 			if ins.State.Name != types.InstanceStateNameRunning {
 				continue
-			}
-			for _, tag := range ins.Tags {
-				if *tag.Key == AWSTagNameNeuwerkVIP {
-					addr, _, err := net.ParseCIDR(*tag.Value)
-					if err != nil {
-						return nil, fmt.Errorf("unabke to parse vip %q: %w", *tag.Value, err)
-					}
-					out.VIPAddress = addr.String()
-				}
 			}
 			for _, iface := range ins.NetworkInterfaces {
 				if iface.PrivateIpAddress == nil {
@@ -261,8 +246,6 @@ func Discover(ctx context.Context) (*DiscoveryOutput, error) {
 							DeviceName:     lnk.Attrs().Name,
 							PrimaryAddress: *iface.PrivateIpAddress,
 							ENIID:          *iface.NetworkInterfaceId,
-							Description:    *iface.Description,
-							SubnetID:       *iface.SubnetId,
 						}
 					}
 
@@ -271,8 +254,14 @@ func Discover(ctx context.Context) (*DiscoveryOutput, error) {
 							DeviceName:     lnk.Attrs().Name,
 							PrimaryAddress: *iface.PrivateIpAddress,
 							ENIID:          *iface.NetworkInterfaceId,
-							Description:    *iface.Description,
-							SubnetID:       *iface.SubnetId,
+						}
+					}
+
+					if *iface.Description == EgressDeviceDescription {
+						out.EgressInterface = NetworkInterface{
+							DeviceName:     lnk.Attrs().Name,
+							PrimaryAddress: *iface.PrivateIpAddress,
+							ENIID:          *iface.NetworkInterfaceId,
 						}
 					}
 
@@ -280,17 +269,14 @@ func Discover(ctx context.Context) (*DiscoveryOutput, error) {
 					continue
 				}
 
-				out.PeerInterfaces = append(out.PeerInterfaces, NetworkInterface{
-					DeviceName:     "", // not known
-					PrimaryAddress: *iface.PrivateIpAddress,
-					ENIID:          *iface.NetworkInterfaceId,
-					Description:    *iface.Description,
-					SubnetID:       *iface.SubnetId,
-				})
-
 				// skip ingress device, peers are connecting to the management interface
 				if *iface.Description == IngressDeviceDescription {
 					logger.V(2).Info("skipping ingress device", "instance", *ins.InstanceId, "iface", *iface.Description, "addr", *iface.PrivateIpAddress)
+					continue
+				}
+
+				if *iface.Description == EgressDeviceDescription {
+					logger.V(2).Info("skipping egress device", "instance", *ins.InstanceId, "iface", *iface.Description, "addr", *iface.PrivateIpAddress)
 					continue
 				}
 
@@ -300,26 +286,7 @@ func Discover(ctx context.Context) (*DiscoveryOutput, error) {
 		}
 	}
 
-	// when used from e2e tests, we do not have an ingress interface,
-	// hence we need to return early
-	if out.IngressInterface.SubnetID == "" {
-		return out, nil
-	}
-
-	subnetOut, err := ec2c.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{
-		SubnetIds: []string{out.IngressInterface.SubnetID},
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, subnet := range subnetOut.Subnets {
-		_, ipNet, err := net.ParseCIDR(*subnet.CidrBlock)
-		if err != nil {
-			return nil, err
-		}
-		out.IngressInterface.SubnetCIDR = *ipNet
-	}
-
+	logger.Info("discovery interface info", "ingress", out.IngressInterface, "egress", out.EgressInterface, "mgmt", out.ManagementInterface)
 	return out, nil
 }
 

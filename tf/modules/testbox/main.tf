@@ -19,24 +19,22 @@ data "aws_ami" "amazon-linux" {
 }
 
 resource "aws_instance" "test_box" {
-  ami           = data.aws_ami.amazon-linux.id
+  ami = data.aws_ami.amazon-linux.id
 
-  instance_type = "t2.micro"
-  key_name      = local.ssh_key_name
-  subnet_id     = var.mgmt_subnet_ids[0]
-  vpc_security_group_ids = [aws_security_group.allow_ssh_icmp.id]
+  instance_type               = "t2.micro"
+  key_name                    = var.ssh_key_name
+  subnet_id                   = var.subnet_id
+  vpc_security_group_ids      = [aws_security_group.allow_ssh_icmp.id]
   associate_public_ip_address = false
 
-  iam_instance_profile = module.asg.iam_instance_profile_id
-
   tags = {
-    Name = "text_box"
+    Name = var.name
   }
 
 }
 
 resource "aws_security_group" "allow_ssh_icmp" {
-  name        = "test_box_allow_ssh_icmp"
+  name        = "${var.name}_testbox_allow_ssh_icmp"
   description = "Allow SSH and ALL ICMP IPV4 inbound traffic"
   vpc_id      = var.vpc_id
 

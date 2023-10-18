@@ -15,7 +15,6 @@ package e2e
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -25,7 +24,6 @@ import (
 	// nolint
 	"github.com/moolen/neuwerk/pkg/integration/aws"
 	. "github.com/onsi/ginkgo/v2"
-	"github.com/vishvananda/netlink"
 
 	// nolint
 	. "github.com/onsi/gomega"
@@ -44,15 +42,6 @@ var (
 )
 
 var _ = SynchronizedBeforeSuite(func() []byte {
-	vpcResolver := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{
-				Timeout: time.Millisecond * time.Duration(10000),
-			}
-			return d.DialContext(ctx, network, "10.0.0.2:53")
-		},
-	}
 
 	var err error
 	GinkgoLogr.Info("autodiscover aws context")
@@ -75,56 +64,9 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 		}
 	}
 
-	var lnk netlink.Link
-	links, err := netlink.LinkList()
-	if err != nil {
-		Fail(err.Error())
-	}
-	for _, link := range links {
-		if link.Attrs().Name == "lo" {
-			continue
-		}
-		lnk = link
-	}
-
-	hosts := append(httpsOnlyHosts, blockedhosts...)
-	for _, host := range hosts {
-		addrs, err := vpcResolver.LookupIP(context.Background(), "ip4", host)
-		if err != nil {
-			Fail(err.Error())
-		}
-		for _, addr := range addrs {
-			GinkgoLogr.Info("replacing netlink", "iface", lnk.Attrs().Name, "addr", addr, "via", discovery.VIPAddress)
-			if addr.To4() == nil {
-				continue
-			}
-			err = netlink.RouteReplace(&netlink.Route{
-				LinkIndex: lnk.Attrs().Index,
-				Dst: &net.IPNet{
-					IP:   addr,
-					Mask: net.IPv4Mask(0xff, 0xff, 0xff, 0xff),
-				},
-				Gw: net.ParseIP(discovery.VIPAddress),
-			})
-			if err != nil {
-				Fail(err.Error())
-			}
-		}
-	}
-
-	if err != nil {
-		Fail(err.Error())
-	}
-
 	dialer := &net.Dialer{
 		Resolver: &net.Resolver{
 			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{
-					Timeout: time.Duration(5000) * time.Millisecond,
-				}
-				return d.DialContext(ctx, "udp", fmt.Sprintf("%s:53", discovery.VIPAddress))
-			},
 		},
 	}
 

@@ -35,6 +35,9 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(RejectedDNSQueryCount)
 	prometheus.MustRegister(DNSRequestDuration)
 	prometheus.MustRegister(DNSUpstreamDuration)
+	prometheus.MustRegister(GCStaleDistributedState)
+	prometheus.MustRegister(BPFReconcileMapsDuration)
 }

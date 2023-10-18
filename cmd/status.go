@@ -47,14 +47,10 @@ func dumpConfig(bpffs string) error {
 	fmt.Println("--------------")
 	fmt.Printf("leader: %t\n", discovery.IsLeader)
 	fmt.Printf("ingress interface: %s\n", discovery.IngressInterface.String())
-	fmt.Printf("mgmt interface: %s\n", discovery.ManagementInterface.String())
-	fmt.Printf("vip: %s\n", discovery.VIPAddress)
+	fmt.Printf("ingress interface: %s\n", discovery.EgressInterface.String())
 	fmt.Printf("peers: %v\n", discovery.Peers)
-	for i, iface := range discovery.PeerInterfaces {
-		fmt.Printf("peer interface[%d]: %s\n", i, iface.String())
-	}
 
-	coll, err := bpf.Load(bpffs, discovery.IngressInterface.DeviceName, discovery.IngressInterface.PrimaryAddress, dnsListenHostPort)
+	coll, err := bpf.Load(bpffs, discovery.IngressInterface.DeviceName, discovery.EgressInterface.DeviceName, discovery.IngressInterface.PrimaryAddress, dnsListenHostPort)
 	if err != nil {
 		return err
 	}

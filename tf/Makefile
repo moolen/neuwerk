@@ -1,3 +1,6 @@
+plan:
+	terraform plan -var-file variables.tfvars
+
 apply:
 	terraform apply -var-file variables.tfvars -auto-approve
 
@@ -15,6 +18,9 @@ describe-instances:
 	@aws ec2 describe-instances  --filters "Name=tag:Name,Values=neuwerk" | jq
 
 list-instances:
+	@aws ec2 describe-instances  --filters "Name=tag:Name,Values=neuwerk" | jq -r '.Reservations[].Instances[] | select(.State.Name=="running") | .NetworkInterfaces[] | select(.Description == "egress") | .PrivateIpAddress'
+
+list-instances-mgmt:
 	@aws ec2 describe-instances  --filters "Name=tag:Name,Values=neuwerk" | jq -r '.Reservations[].Instances[] | select(.State.Name=="running") | .NetworkInterfaces[] | select(.Description == "management") | .PrivateIpAddress'
 
 list-instances-ingress:

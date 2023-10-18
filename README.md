@@ -25,17 +25,21 @@ Please also see [moolen/skouter](https://github.com/moolen/skouter) as a counter
 - [ ] config lifecycle management: create / update / remove networks
     - [x] garbage collect old IPs
 - [ ] FQDN hostnames: pre-warm + background updates
-- [ ] support CIDR allowlist
 - [x] integration tests
 - [x] cloud integration
 - [x] metrics: map sizes, histograms for: dns queries, map reconcile duration, gc time
+    - [x] e2e test w/ prometheus
+    - [x] e2e: security hub architecture  
 - [ ] load and scale tests
+- [ ] implement local dns cache
 - [ ] Configuration API (for terraform or other means)
     - [ ] GRPC/Rest
     - [ ] host/network discovery mechanism (k8s?)
 - [ ] consider integration with NLB for DNS load balancing
 - [ ] multi-az deployment
+- [ ] support CIDR allowlist
 - [ ] audit mode
+    - [ ] observability for denied requests:  metrics and `tap` packet flow
 - [ ] AWS GWLB integration (NAT?!)
 - [ ] software upgrade & maintenance automation
 
