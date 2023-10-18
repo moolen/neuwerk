@@ -126,12 +126,3 @@ Then switch to the `testbox` node and run the e2e tests:
 ```
 $ sudo ./e2e.test
 ```
-
-To improve failover time from moving the virtual IP you should tune `gc_stale_time` and `gc_interval`, for more [details see here](https://stackoverflow.com/questions/15372011/configuring-arp-age-timeout#answer-15511117). 
-
-```
-echo 15 > /proc/sys/net/ipv4/neigh/default/gc_stale_time
-echo 60 > /proc/sys/net/ipv4/route/gc_timeout
-echo 5000 > /proc/sys/net/ipv4/neigh/default/base_reachable_time_ms
-echo 15 > /proc/sys/net/ipv4/route/gc_interval
-```
