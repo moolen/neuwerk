@@ -64,5 +64,8 @@ func (c *Controller) reconcileCoordinator() error {
 			isCoordinator = true
 		}
 	}
-	return c.coordinatorReconcilerFunc(c.ctx, isCoordinator)
+	if c.coordinatorReconcilerFunc != nil {
+		return c.coordinatorReconcilerFunc(c.ctx, isCoordinator)
+	}
+	return nil
 }

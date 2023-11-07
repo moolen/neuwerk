@@ -13,6 +13,16 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type bpfAuditEvent struct {
+	SourceAddr uint32
+	DestAddr   uint32
+	SourcePort uint16
+	DestPort   uint16
+	Proto      uint8
+	Unused0    uint8
+	Unused1    uint16
+}
+
 type bpfNetworkCidr struct {
 	Addr uint32
 	Mask uint32
@@ -72,6 +82,8 @@ type bpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
+	AuditRingbuf    *ebpf.MapSpec `ebpf:"audit_ringbuf"`
+	Metrics         *ebpf.MapSpec `ebpf:"metrics"`
 	NetworkCidrs    *ebpf.MapSpec `ebpf:"network_cidrs"`
 	NetworkPolicies *ebpf.MapSpec `ebpf:"network_policies"`
 	PktTrack        *ebpf.MapSpec `ebpf:"pkt_track"`
@@ -96,6 +108,8 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
+	AuditRingbuf    *ebpf.Map `ebpf:"audit_ringbuf"`
+	Metrics         *ebpf.Map `ebpf:"metrics"`
 	NetworkCidrs    *ebpf.Map `ebpf:"network_cidrs"`
 	NetworkPolicies *ebpf.Map `ebpf:"network_policies"`
 	PktTrack        *ebpf.Map `ebpf:"pkt_track"`
@@ -103,6 +117,8 @@ type bpfMaps struct {
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
+		m.AuditRingbuf,
+		m.Metrics,
 		m.NetworkCidrs,
 		m.NetworkPolicies,
 		m.PktTrack,

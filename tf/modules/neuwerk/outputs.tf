@@ -21,3 +21,6 @@ output "ingress_route_table_id" {
 output "public_route_table_id" {
   value = aws_route_table.public.id
 }
+output "testbox_ip_internal" {
+  value = module.testbox.ip
+}

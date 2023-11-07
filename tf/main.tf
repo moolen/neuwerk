@@ -45,9 +45,6 @@ module "tgw" {
       tgw_routes = [
         {
           destination_cidr_block = local.apps_vpc_cidr
-        },
-        {
-          destination_cidr_block = "0.0.0.0/0"
         }
       ]
     }
@@ -64,6 +61,12 @@ module "tgw" {
       ]
     }
   }
+}
+
+resource "aws_ec2_transit_gateway_route" "default_route" {
+  destination_cidr_block = "0.0.0.0/0"
+  transit_gateway_route_table_id = module.tgw.ec2_transit_gateway_association_default_route_table_id
+  transit_gateway_attachment_id  = module.tgw.ec2_transit_gateway_vpc_attachment.neuwerk.id
 }
 
 resource "aws_route" "tgw_neuwerk_egress_to_apps" {

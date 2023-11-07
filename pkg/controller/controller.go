@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,7 +29,7 @@ var (
 )
 
 const (
-	MaxNetworks         = 255
+	MaxNetworks         = 1024
 	CHANNEL_OBSERVE_DNS = "observe-dns"
 	CHANNEL_GC_PKT_MAP  = "gc-pktmap"
 	DMAP_RESOLVED_HOSTS = "resolved-hosts"
@@ -127,6 +128,8 @@ func New(ctx context.Context, opts *ControllerConfig) (*Controller, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to attach bpf prog: %w", err)
 	}
+
+	metrics.InitializeCollector(c.mgmtAddr, c.coll.MetricsMap)
 
 	logger.Info("creating dnscache")
 	c.cache, err = memory.New(ctx)
@@ -353,7 +356,7 @@ func (c *Controller) reconcileMaps() error {
 }
 
 func (c *Controller) startOlric() error {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	cfg := config.New("lan")
 	cfg.Peers = c.peers
 	cfg.BindAddr = c.mgmtAddr
@@ -366,10 +369,15 @@ func (c *Controller) startOlric() error {
 	cfg.MemberlistConfig.BindPort = c.mgmtPort
 	cfg.EnableClusterEventsChannel = true
 	cfg.Started = func() {
-		defer cancel()
 		logger.Info("[INFO] Olric is ready to accept connections")
+		cancel()
 	}
-	logger.Info("starting olric")
+	logger.Info("starting olric",
+		"peers", cfg.Peers,
+		"bind", net.JoinHostPort(cfg.BindAddr, strconv.Itoa(cfg.BindPort)),
+		"memberlist:advertise", net.JoinHostPort(cfg.MemberlistConfig.AdvertiseAddr, strconv.Itoa(cfg.MemberlistConfig.AdvertisePort)),
+		"memberlist:bind", net.JoinHostPort(cfg.MemberlistConfig.BindAddr, strconv.Itoa(cfg.MemberlistConfig.BindPort)),
+	)
 	db, err := olric.New(cfg)
 	if err != nil {
 		return err
@@ -378,6 +386,7 @@ func (c *Controller) startOlric() error {
 		err = db.Start()
 		if err != nil {
 			logger.Error(err, "olric.Start returned an error")
+			cancel()
 		}
 	}()
 	<-ctx.Done()
@@ -387,7 +396,7 @@ func (c *Controller) startOlric() error {
 	if err != nil {
 		return err
 	}
-
+	ctx = context.Background()
 	ps := c.pubsub.Subscribe(ctx, CHANNEL_OBSERVE_DNS)
 	go func() {
 		logger.Info("starting subscribe handler", "channel", CHANNEL_OBSERVE_DNS)

@@ -26,6 +26,3 @@ scp $SSH_ARGS -o "ProxyCommand ssh ec2-user@${NEUWERK_BASTION_PUBLIC_ADDR} -W %h
 # deploy monitoring
 scp $SSH_ARGS -o "ProxyCommand ssh ec2-user@${NEUWERK_BASTION_PUBLIC_ADDR} -W %h:%p" "${SCRIPT_DIR}/setup-prometheus.sh" ec2-user@${NEUWERK_TESTBOX_INTERNAL}:/home/ec2-user/setup-prometheus.sh
 ssh $SSH_ARGS -o "ProxyCommand ssh ec2-user@${NEUWERK_BASTION_PUBLIC_ADDR} -W %h:%p" ec2-user@${NEUWERK_TESTBOX_INTERNAL} "./setup-prometheus.sh '${NEUWERK_INTERNAL}'"
-
-
-ssh -f -A -L 8888:127.0.0.1:9090 -i "${SSH_KEY}" -o "ProxyCommand ssh ec2-user@${NEUWERK_BASTION_PUBLIC_ADDR} -W %h:%p" ec2-user@${NEUWERK_TESTBOX_INTERNAL} /bin/sleep 3600

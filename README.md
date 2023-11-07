@@ -32,14 +32,16 @@ Please also see [moolen/skouter](https://github.com/moolen/skouter) as a counter
     - [x] e2e: security hub architecture  
 - [ ] load and scale tests
 - [ ] implement local dns cache
+- [ ] implement TCP DNS server
 - [ ] Configuration API (for terraform or other means)
     - [ ] GRPC/Rest
     - [ ] host/network discovery mechanism (k8s?)
 - [ ] consider integration with NLB for DNS load balancing
 - [ ] multi-az deployment
 - [ ] support CIDR allowlist
-- [ ] audit mode
+- [x] audit mode
     - [ ] observability for denied requests:  metrics and `tap` packet flow
+    - [ ] improve perf footprint of audit mode
 - [ ] AWS GWLB integration (NAT?!)
 - [ ] software upgrade & maintenance automation
 

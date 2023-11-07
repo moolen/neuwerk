@@ -31,6 +31,7 @@ var (
 	deviceName          string
 	dbBindPort          int
 	mgmtPort            int
+	mgmtAddress         string
 )
 
 var rootCmd = &cobra.Command{
@@ -58,6 +59,7 @@ var rootCmd = &cobra.Command{
 			Peers:               peers,
 			DBBindPort:          dbBindPort,
 			MgmtPort:            mgmtPort,
+			ManagementAddress:   mgmtAddress,
 			RuleProvider:        fileWatcher,
 		}
 
@@ -128,9 +130,10 @@ func init() {
 	rootCmd.Flags().StringVar(&dnsUpstreamHostPort, "dns-upstream-host-port", "8.8.8.8:53", "trusted upstream DNS server address")
 	rootCmd.Flags().StringVar(&bpffs, "bpffs", "/sys/fs/bpf", "bpf file system location")
 	rootCmd.Flags().StringArrayVar(&peers, "peers", nil, "state cluster peers")
-	rootCmd.Flags().StringVar(&deviceName, "net-device", "wlp61s0", "name of the network device to attach the tc filter to")
+	rootCmd.Flags().StringVar(&deviceName, "net-device", "wlan0", "name of the network device to attach the tc filter to")
 	rootCmd.Flags().IntVar(&dbBindPort, "db-bind-port", 3320, "db port to listen on")
 	rootCmd.Flags().IntVar(&mgmtPort, "mgmt-bind-port", 3322, "mgmt port to listen on")
+	rootCmd.Flags().StringVar(&mgmtAddress, "mgmt-address", "127.0.0.1", "mgmt port to listen on")
 }
 
 // initConfig reads in config file and ENV variables if set.

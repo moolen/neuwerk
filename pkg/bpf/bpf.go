@@ -22,12 +22,15 @@ type Collection struct {
 	NetworkPolicies *ebpf.Map
 	PolicyConfigMap *ebpf.Map
 	PktTrack        *ebpf.Map
+	MetricsMap      *ebpf.Map
+	AuditEvents     *ebpf.Map
 
 	ingressDeviceName string
 }
 
 type NetworkCIDR bpfNetworkCidr
 type PolicyKey bpfPolicyKey
+type AuditEvent bpfAuditEvent
 
 var (
 	// Name of the directory in /sys/fs/bpf that holds the pinned maps/progs
@@ -35,7 +38,7 @@ var (
 	logger      = log.DefaultLogger.WithName("bpf").V(1)
 )
 
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -type policy_key -type network_cidr bpf ./c/ingress.c -- -I./c/headers
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS -type policy_key -type network_cidr -type audit_event bpf ./c/ingress.c -- -I./c/headers
 func Load(bpffs, ingressDeviceName, egressDeviceName, ingressAddr, dnsListenHostPort string) (*Collection, error) {
 	pinPath := filepath.Join(bpffs, BPFMountDir)
 	logger.Info("loading bpf", "pin-path", pinPath)
@@ -84,6 +87,8 @@ func Load(bpffs, ingressDeviceName, egressDeviceName, ingressAddr, dnsListenHost
 		NetworkCIDRs:      objs.bpfMaps.NetworkCidrs,
 		NetworkPolicies:   objs.bpfMaps.NetworkPolicies,
 		PktTrack:          objs.bpfMaps.PktTrack,
+		MetricsMap:        objs.bpfMaps.Metrics,
+		AuditEvents:       objs.bpfMaps.AuditRingbuf,
 		ingressDeviceName: ingressDeviceName,
 	}, nil
 }
@@ -91,7 +96,7 @@ func Load(bpffs, ingressDeviceName, egressDeviceName, ingressAddr, dnsListenHost
 // rewrites constants in bpf spec to store static data
 // see `static volatile const` in `ingress.c`
 func rewriteConstants(spec *ebpf.CollectionSpec, targetRedirectDeviceName, ingressAddr, dnsListenHostPort string) error {
-	logger.Info("rewriting constants", "target-redirect-device", targetRedirectDeviceName, "vip-addr", ingressAddr, "dnslistenhostport", dnsListenHostPort)
+	logger.Info("rewriting constants", "target-redirect-device", targetRedirectDeviceName, "ingress-addr", ingressAddr, "dnslistenhostport", dnsListenHostPort)
 	// get ingress device index
 	nl, err := netlink.LinkByName(targetRedirectDeviceName)
 	if err != nil {

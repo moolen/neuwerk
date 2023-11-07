@@ -87,7 +87,10 @@ func (p *DNSProxy) ServeDNS(w dns.ResponseWriter, msg *dns.Msg) {
 			metrics.RejectedDNSQueryCount.With(prometheus.Labels{}).Inc()
 			cpy := &dns.Msg{}
 			cpy.SetRcode(msg, dns.RcodeNameError)
-			w.WriteMsg(cpy)
+			err = w.WriteMsg(cpy)
+			if err != nil {
+				logger.Error(err, "unable to write message")
+			}
 			return
 		}
 	}
