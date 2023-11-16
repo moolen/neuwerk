@@ -41,6 +41,27 @@ struct {
   __uint(pinning, LIBBPF_PIN_BY_NAME);
 } audit_ringbuf SEC(".maps");
 
+#define SETTING_ENABLE_MONITOR 1
+#define SETTING_AUDIT_MODE 2
+#define SETTING_LAST_SAMPLE_TIMESTAMP 100
+#define SETTING_ENABLED 1
+
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, 1024);
+  __type(key, __u32);   // setting index
+  __type(value, __u32); // setting value
+  __uint(pinning, LIBBPF_PIN_BY_NAME);
+} settings SEC(".maps");
+
+__u32 get_setting(__u32 setting) {
+  __u32 *val = bpf_map_lookup_elem(&settings, &setting);
+  if (val == NULL) {
+    return 0;
+  }
+  return *val;
+}
+
 // packet metrics
 // the following #defines specify the indices in
 // the the metrics map
@@ -72,6 +93,14 @@ void metrics_set(__u32 key, __u32 val) {
   bpf_map_update_elem(&metrics, &key, &val, BPF_ANY);
 }
 
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __uint(max_entries, MAP_MAX_PKT_TRACK);
+  __type(key, __u32);   // addr
+  __type(value, __u64); // clock_gettime(CLOCK_TAI)
+  __uint(pinning, LIBBPF_PIN_BY_NAME);
+} pkt_track SEC(".maps");
+
 struct policy_key {
   __u32 upstream_addr;
   __u16 upstream_port;
@@ -88,20 +117,12 @@ struct network_policy {
 };
 
 struct {
-  __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, MAP_MAX_PKT_TRACK);
-  __type(key, __u32);   // addr
-  __type(value, __u64); // clock_gettime(CLOCK_TAI)
-  __uint(pinning, LIBBPF_PIN_BY_NAME);
-} pkt_track SEC(".maps");
-
-struct {
   __uint(type, BPF_MAP_TYPE_ARRAY_OF_MAPS);
   __uint(max_entries, MAP_MAX_NETWORKS);
   __type(key, __u32);
   __uint(pinning, LIBBPF_PIN_BY_NAME);
   __array(values, struct network_policy);
-} network_policies SEC(".maps");
+} ip_port_policies SEC(".maps");
 
 struct network_cidr {
   __u32 addr;
@@ -129,6 +150,76 @@ void metrics_inc(__u32 key) {
   __sync_fetch_and_add(count, 1);
 }
 
+void capture_ringbuf_metrics() {
+  __u32 avail_data = bpf_ringbuf_query(&audit_ringbuf, BPF_RB_AVAIL_DATA);
+  __u32 ring_size = bpf_ringbuf_query(&audit_ringbuf, BPF_RB_RING_SIZE);
+  __u32 cons_pos = bpf_ringbuf_query(&audit_ringbuf, BPF_RB_CONS_POS);
+  __u32 prod_pos = bpf_ringbuf_query(&audit_ringbuf, BPF_RB_PROD_POS);
+  metrics_set(METRICS_RINGBUF_AVAIL_DATA, avail_data);
+  metrics_set(METRICS_RINGBUF_RING_SIZE, ring_size);
+  metrics_set(METRICS_RINGBUF_CONS_POS, cons_pos);
+  metrics_set(METRICS_RINGBUF_PROD_POS, prod_pos);
+}
+
+long send_to_monitor(__u32 saddr, __u32 daddr, __u16 source, __u16 dest,
+                     __u8 proto) {
+  bpf_printk("sending audit events");
+  // ------
+  // TODO: allow user to define filter for particular traffic
+  struct audit_event *ev;
+  ev = bpf_ringbuf_reserve(&audit_ringbuf, sizeof(struct audit_event), 0);
+  if (!ev) {
+    metrics_inc(METRICS_ERROR_RINGBUF_ALLOC);
+    return -1;
+  }
+  ev->source_addr = saddr;
+  ev->dest_addr = daddr;
+  ev->source_port = source;
+  ev->dest_port = dest;
+  ev->proto = proto;
+  bpf_ringbuf_submit(ev, 0);
+  return 0;
+}
+
+long apply_ip_port_policy(__u32 network_idx, __u32 saddr, __u32 daddr,
+                          __u16 source, __u16 dest) {
+  // get policies for given network
+  __u32 *policies = bpf_map_lookup_elem(&ip_port_policies, &network_idx);
+  if (policies == NULL) {
+    bpf_printk("no cidr found");
+    return -1;
+  }
+
+  // lookup destination tuple.
+  // if there is a match: apply verdict, otherwise try next and apply
+  // default policy.
+  struct policy_key pk = {0};
+  pk.upstream_addr = daddr;
+  pk.upstream_port = dest;
+  __u8 *verdict = bpf_map_lookup_elem(policies, &pk);
+  if (verdict == NULL) {
+    bpf_printk("verdict is NULL daddr=%lu sport=%d dport=%d", daddr, source,
+               dest);
+    return -1;
+  }
+  bpf_printk("verdict=%d daddr=%lu", *verdict, daddr);
+
+  // track last seen packet
+  __u64 now = bpf_ktime_get_tai_ns();
+  long ok = bpf_map_update_elem(&pkt_track, &daddr, &now, 0);
+  if (ok < 0) {
+    bpf_printk("failed to update ktime %llu", now);
+  }
+  return 0;
+}
+
+long redirect_to_egress() {
+  long redir = bpf_redirect_neigh(net_redir_device, NULL, 0, 0);
+  bpf_printk("redirect=%d device=%d", redir, net_redir_device);
+  metrics_inc(METRICS_PKT_REDIRECT);
+  return redir;
+}
+
 SEC("classifier/cls")
 int ingress(struct __sk_buff *skb) {
   void *data = (void *)(long)skb->data;
@@ -146,53 +237,33 @@ int ingress(struct __sk_buff *skb) {
   bpf_printk("pkt arrived: proto=%lu daddr=%lu dport=%lu", ip->protocol,
              ip->daddr, tcp->dest);
 
-  // TODO: evaluate whether or not this is needed.
-  //       we should not drop non-tcp.
-  if (ip->protocol != 6) {
-    bpf_printk("skip non-tcp");
-    metrics_inc(METRICS_PKT_ALLOWED);
-    return TC_ACT_OK;
-  }
-
   if (ip->daddr == ingress_addr && tcp->dest == dns_listen_port) {
     bpf_printk("pass tcp DNS traffic");
     metrics_inc(METRICS_PKT_ALLOWED);
     return TC_ACT_OK;
   }
 
-  // ------
-  // TODO: 
-  // (1) push only when needed: enable it with `neuwerk monitor`
-  // (2) store verdict so users can filter for particular traffic
-  // (3) neuwerk monitor: aggregate packets by connection
-  struct audit_event *ev;
-  ev = bpf_ringbuf_reserve(&audit_ringbuf, sizeof(struct audit_event), 0);
-  if (!ev) {
-    metrics_inc(METRICS_ERROR_RINGBUF_ALLOC);
-    return TC_ACT_OK;
+  // capture metrics
+  __u64 now = bpf_ktime_get_tai_ns();
+  __u32 now32 = (now >> 32); // get high 32 bits
+  __u32 ts = get_setting(SETTING_LAST_SAMPLE_TIMESTAMP);
+  if (now32 > ts + 3) { // ~18sec
+    __u32 key = SETTING_LAST_SAMPLE_TIMESTAMP;
+    bpf_map_update_elem(&settings, &key, &now32, 0);
+    capture_ringbuf_metrics();
   }
-  ev->source_addr = ip->saddr;
-  ev->dest_addr = ip->daddr;
-  ev->source_port = tcp->source;
-  ev->dest_port = tcp->dest;
-  ev->proto = ip->protocol;
-  __u32 avail_data = bpf_ringbuf_query(&audit_ringbuf, BPF_RB_AVAIL_DATA);
-  __u32 ring_size = bpf_ringbuf_query(&audit_ringbuf, BPF_RB_RING_SIZE);
-  __u32 cons_pos = bpf_ringbuf_query(&audit_ringbuf, BPF_RB_CONS_POS);
-  __u32 prod_pos = bpf_ringbuf_query(&audit_ringbuf, BPF_RB_PROD_POS);
-  metrics_set(METRICS_RINGBUF_AVAIL_DATA, avail_data);
-  metrics_set(METRICS_RINGBUF_RING_SIZE, ring_size);
-  metrics_set(METRICS_RINGBUF_CONS_POS, cons_pos);
-  metrics_set(METRICS_RINGBUF_PROD_POS, prod_pos);
-  bpf_ringbuf_submit(ev, 0);
-  // -----
+
+  if (get_setting(SETTING_ENABLE_MONITOR) == SETTING_ENABLED) {
+    send_to_monitor(ip->saddr, ip->daddr, tcp->source, tcp->dest, ip->protocol);
+  }
 
   // check if source ip is in a given network cidr
   // if it is: apply configured policies
   for (__u16 i = 0; i < MAP_MAX_NETWORKS; i++) {
     bpf_printk("checking network [%d]", i);
-    __u32 ii = i;
-    struct network_cidr *cidr = bpf_map_lookup_elem(&network_cidrs, &ii);
+    __u32 network_idx = i;
+    struct network_cidr *cidr =
+        bpf_map_lookup_elem(&network_cidrs, &network_idx);
     if (cidr == NULL) {
       bpf_printk("no cidr found");
       break;
@@ -206,38 +277,20 @@ int ingress(struct __sk_buff *skb) {
       continue;
     }
 
-    // get policies for given network
-    __u32 *policies = bpf_map_lookup_elem(&network_policies, &ii);
-    if (policies == NULL) {
-      bpf_printk("no cidr found");
+    if (apply_ip_port_policy(network_idx, ip->saddr, ip->daddr, tcp->source,
+                             tcp->dest) < 0) {
       break;
     }
+    return redirect_to_egress();
+  }
 
-    // lookup destination tuple.
-    // if there is a match: apply verdict, otherwise try next and apply
-    // default policy.
-    struct policy_key pk = {0};
-    pk.upstream_addr = ip->daddr;
-    pk.upstream_port = tcp->dest;
-    __u8 *verdict = bpf_map_lookup_elem(policies, &pk);
-    if (verdict == NULL) {
-      bpf_printk("verdict is NULL daddr=%lu sport=%d dport=%d", ip->daddr,
-                 tcp->source, tcp->dest);
-      break;
-    }
-    bpf_printk("verdict=%d daddr=%lu", *verdict, ip->daddr);
-
-    // track last seen packet
-    __u64 now = bpf_ktime_get_tai_ns();
-    long ok = bpf_map_update_elem(&pkt_track, &ip->daddr, &now, 0);
-    if (ok < 0) {
-      bpf_printk("failed to update ktime %llu", now);
-    }
-
-    long redir = bpf_redirect_neigh(net_redir_device, NULL, 0, 0);
-    bpf_printk("redirect=%d", redir);
-    metrics_inc(METRICS_PKT_REDIRECT);
-    return redir;
+  // in audit mode we do NOT drop packets
+  // instead we always redirect the packets.
+  // the metrics however should indicate PKT_BLOCKED
+  // to make it visible that something would be dropped
+  if (get_setting(SETTING_AUDIT_MODE) == SETTING_ENABLED) {
+    metrics_inc(METRICS_PKT_BLOCKED);
+    return redirect_to_egress();
   }
 
   bpf_printk("dropping packet");

@@ -110,7 +110,8 @@ func New(ctx context.Context, opts *ControllerConfig) (*Controller, error) {
 	}
 
 	// reset map data because we want to start from scratch when we reboot
-	it := c.coll.NetworkPolicies.Iterate()
+	logger.Info("resetting ip/port policy data")
+	it := c.coll.IPPortPolicies.Iterate()
 	var idx uint32
 	var mapID uint32
 	for it.Next(&idx, &mapID) {
@@ -213,8 +214,12 @@ func getOPKey(op *dnsproxy.ObservePayload) string {
 }
 
 func (c *Controller) VerifyHostname(sourceAddr net.IP, host string) bool {
-	logger.Info("verifying hostname", "host", host)
-	return c.ruleProvider.Get().HostAllowed(sourceAddr, host)
+	verdict := c.ruleProvider.Get().HostAllowed(sourceAddr, host)
+	// TODO: we probably shouldn't look up bpf maps in the hot path
+	if setting, _ := c.coll.GetSetting(bpf.SETTING_AUDIT_MODE); setting == bpf.SETTING_ENABLED {
+		return true
+	}
+	return verdict
 }
 
 func (c *Controller) updateMapHostname(op *dnsproxy.ObservePayload) {
@@ -224,7 +229,7 @@ func (c *Controller) updateMapHostname(op *dnsproxy.ObservePayload) {
 			if pol.Regexp != nil && pol.Regexp.MatchString(op.Name) {
 				logger.Info("updating network policy", "policy", pol, "op", op)
 				var innerID ebpf.MapID
-				err := c.coll.NetworkPolicies.Lookup(uint32(i), &innerID)
+				err := c.coll.IPPortPolicies.Lookup(uint32(i), &innerID)
 				if err != nil {
 					logger.Error(err, "unable to lookup inner network policy id")
 					continue
@@ -287,7 +292,7 @@ func (c *Controller) reconcileMaps() error {
 				return fmt.Errorf("unable to create inner map: %w", err)
 			}
 			defer m.Close()
-			err = c.coll.NetworkPolicies.Put(uint32(i), uint32(m.FD()))
+			err = c.coll.IPPortPolicies.Put(uint32(i), uint32(m.FD()))
 			if err != nil {
 				return fmt.Errorf("unable to put inner network policy: %w", err)
 			}
@@ -344,7 +349,7 @@ func (c *Controller) reconcileMaps() error {
 				return fmt.Errorf("unable to reset network cidrs %w", err)
 			}
 			// delete stale policy entries
-			err = c.coll.NetworkPolicies.Delete(uint32(i))
+			err = c.coll.IPPortPolicies.Delete(uint32(i))
 			if err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
 				return fmt.Errorf("unable to delete network policies: %w", err)
 			}

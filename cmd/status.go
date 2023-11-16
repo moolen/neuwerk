@@ -58,7 +58,7 @@ func dumpConfig(bpffs string) error {
 	fmt.Println("\n==============")
 	fmt.Println("bpf:NetworkPolicy")
 	fmt.Println("--------------")
-	it := coll.NetworkPolicies.Iterate()
+	it := coll.IPPortPolicies.Iterate()
 	var key uint32
 	var mapId uint32
 	for it.Next(&key, &mapId) {

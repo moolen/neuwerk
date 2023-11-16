@@ -156,7 +156,7 @@ func (c *Controller) gcBPFMaps(addr string) error {
 	// delete from NetworkPolicy table
 	// TODO: consider aggregating the ports to do direct lookups on the polMap
 	//       instead of iterating over all entries
-	it := c.coll.NetworkPolicies.Iterate()
+	it := c.coll.IPPortPolicies.Iterate()
 	var netIdx uint32
 	var polMapID uint32
 	for it.Next(&netIdx, &polMapID) {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/cilium/ebpf/ringbuf"
@@ -30,6 +31,13 @@ var monitorCmd = &cobra.Command{
 	},
 }
 
+var protoMap = map[uint8]string{
+	1:  "ICMP",
+	4:  "IPIP",
+	6:  "TCP",
+	17: "UDP",
+}
+
 func monitor(bpffs string) error {
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
@@ -47,6 +55,11 @@ func monitor(bpffs string) error {
 	if err != nil {
 		return err
 	}
+	err = coll.ApplySetting(bpf.SETTING_ENABLE_MONITOR, bpf.SETTING_ENABLED)
+	if err != nil {
+		return err
+	}
+	defer coll.ApplySetting(bpf.SETTING_ENABLE_MONITOR, bpf.SETTING_DISABLED)
 
 	rd, err := ringbuf.NewReader(coll.AuditEvents)
 	if err != nil {
@@ -84,8 +97,16 @@ func monitor(bpffs string) error {
 		}
 
 		// TODO: aggregate by connection
-		fmt.Printf("[%d] %s:%d -> %s:%d\n", event.Proto, util.ToIP(event.SourceAddr), util.ToHost16(event.SourcePort), util.ToIP(event.DestAddr), util.ToHost16(event.DestPort))
+		fmt.Printf("[%s] %s:%d -> %s:%d\n", printProto(event.Proto), util.ToIP(event.SourceAddr), util.ToHost16(event.SourcePort), util.ToIP(event.DestAddr), util.ToHost16(event.DestPort))
 	}
+}
+
+func printProto(proto uint8) string {
+	str, ok := protoMap[proto]
+	if !ok {
+		return strconv.Itoa(int(proto))
+	}
+	return str
 }
 
 func init() {

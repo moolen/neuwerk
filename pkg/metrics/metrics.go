@@ -109,7 +109,7 @@ func (cc MetricsCollector) Collect(ch chan<- prometheus.Metric) {
 		var val uint32
 		err := cc.metricsMap.Lookup(key, &val)
 		if err != nil && err != ebpf.ErrKeyNotExist {
-			logger.Error(err, "unable to lookup metric", "key", key)
+			logger.V(1).Info("unable to lookup metric", "err", err, "key", key)
 			continue
 		}
 		ch <- prometheus.MustNewConstMetric(gauge, prometheus.GaugeValue, float64(val))

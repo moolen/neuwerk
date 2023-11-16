@@ -82,11 +82,12 @@ type bpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	AuditRingbuf    *ebpf.MapSpec `ebpf:"audit_ringbuf"`
-	Metrics         *ebpf.MapSpec `ebpf:"metrics"`
-	NetworkCidrs    *ebpf.MapSpec `ebpf:"network_cidrs"`
-	NetworkPolicies *ebpf.MapSpec `ebpf:"network_policies"`
-	PktTrack        *ebpf.MapSpec `ebpf:"pkt_track"`
+	AuditRingbuf   *ebpf.MapSpec `ebpf:"audit_ringbuf"`
+	IpPortPolicies *ebpf.MapSpec `ebpf:"ip_port_policies"`
+	Metrics        *ebpf.MapSpec `ebpf:"metrics"`
+	NetworkCidrs   *ebpf.MapSpec `ebpf:"network_cidrs"`
+	PktTrack       *ebpf.MapSpec `ebpf:"pkt_track"`
+	Settings       *ebpf.MapSpec `ebpf:"settings"`
 }
 
 // bpfObjects contains all objects after they have been loaded into the kernel.
@@ -108,20 +109,22 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	AuditRingbuf    *ebpf.Map `ebpf:"audit_ringbuf"`
-	Metrics         *ebpf.Map `ebpf:"metrics"`
-	NetworkCidrs    *ebpf.Map `ebpf:"network_cidrs"`
-	NetworkPolicies *ebpf.Map `ebpf:"network_policies"`
-	PktTrack        *ebpf.Map `ebpf:"pkt_track"`
+	AuditRingbuf   *ebpf.Map `ebpf:"audit_ringbuf"`
+	IpPortPolicies *ebpf.Map `ebpf:"ip_port_policies"`
+	Metrics        *ebpf.Map `ebpf:"metrics"`
+	NetworkCidrs   *ebpf.Map `ebpf:"network_cidrs"`
+	PktTrack       *ebpf.Map `ebpf:"pkt_track"`
+	Settings       *ebpf.Map `ebpf:"settings"`
 }
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
 		m.AuditRingbuf,
+		m.IpPortPolicies,
 		m.Metrics,
 		m.NetworkCidrs,
-		m.NetworkPolicies,
 		m.PktTrack,
+		m.Settings,
 	)
 }
 

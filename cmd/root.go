@@ -28,7 +28,8 @@ var (
 	verbosity           int
 	bpffs               string
 	peers               []string
-	deviceName          string
+	ingressDevice       string
+	egressDevice        string
 	dbBindPort          int
 	mgmtPort            int
 	mgmtAddress         string
@@ -53,7 +54,8 @@ var rootCmd = &cobra.Command{
 			ClusterName:         clusterName,
 			Integration:         integration,
 			BPFFS:               bpffs,
-			EgressDeviceName:    deviceName,
+			EgressDeviceName:    egressDevice,
+			IngressDeviceName:   ingressDevice,
 			DNSListenHostPort:   dnsListenHostPort,
 			DNSUpstreamHostPort: dnsUpstreamHostPort,
 			Peers:               peers,
@@ -130,7 +132,8 @@ func init() {
 	rootCmd.Flags().StringVar(&dnsUpstreamHostPort, "dns-upstream-host-port", "8.8.8.8:53", "trusted upstream DNS server address")
 	rootCmd.Flags().StringVar(&bpffs, "bpffs", "/sys/fs/bpf", "bpf file system location")
 	rootCmd.Flags().StringArrayVar(&peers, "peers", nil, "state cluster peers")
-	rootCmd.Flags().StringVar(&deviceName, "net-device", "wlan0", "name of the network device to attach the tc filter to")
+	rootCmd.Flags().StringVar(&ingressDevice, "ingress-device", "eth0", "name of the network device to attach the tc filter to")
+	rootCmd.Flags().StringVar(&egressDevice, "egress-device", "eth1", "name of the network device to forward the traffic to")
 	rootCmd.Flags().IntVar(&dbBindPort, "db-bind-port", 3320, "db port to listen on")
 	rootCmd.Flags().IntVar(&mgmtPort, "mgmt-bind-port", 3322, "mgmt port to listen on")
 	rootCmd.Flags().StringVar(&mgmtAddress, "mgmt-address", "127.0.0.1", "mgmt port to listen on")

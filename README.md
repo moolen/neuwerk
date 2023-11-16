@@ -40,8 +40,8 @@ Please also see [moolen/skouter](https://github.com/moolen/skouter) as a counter
 - [ ] multi-az deployment
 - [ ] support CIDR allowlist
 - [x] audit mode
-    - [ ] observability for denied requests:  metrics and `tap` packet flow
-    - [ ] improve perf footprint of audit mode
+    - [x] observability for denied requests:  metrics and logs
+    - [x] improve perf footprint of audit mode
 - [ ] AWS GWLB integration (NAT?!)
 - [ ] software upgrade & maintenance automation
 
