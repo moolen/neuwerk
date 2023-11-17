@@ -27,6 +27,14 @@ var (
 		Buckets: []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25},
 	}, []string{ResultLabel})
 
+	DNSCacheMiss = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "dns_cache_miss",
+	}, []string{})
+
+	DNSCacheHit = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "dns_cache_hit",
+	}, []string{})
+
 	GCStaleDistributedState = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "gc_stale_distributed_state_duration_seconds",
 		Buckets: []float64{0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 45},

@@ -31,7 +31,7 @@ Please also see [moolen/skouter](https://github.com/moolen/skouter) as a counter
     - [x] e2e test w/ prometheus
     - [x] e2e: security hub architecture  
 - [ ] load and scale tests
-- [ ] implement local dns cache
+- [x] implement local dns cache
 - [ ] implement TCP DNS server
 - [ ] Configuration API (for terraform or other means)
     - [ ] GRPC/Rest

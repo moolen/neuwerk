@@ -126,7 +126,6 @@ func (p *DNSProxy) ServeDNS(w dns.ResponseWriter, msg *dns.Msg) {
 }
 
 func (p *DNSProxy) LookupWithCache(msg *dns.Msg) (*dns.Msg, error) {
-	// TODO: lookup & update cache
 	resultCode := metrics.ResultCodeOK
 	start := time.Now()
 	defer func() {
@@ -134,9 +133,25 @@ func (p *DNSProxy) LookupWithCache(msg *dns.Msg) (*dns.Msg, error) {
 			metrics.ResultLabel: resultCode,
 		}).Observe(float64(time.Since(start).Seconds()))
 	}()
-	res, err := p.Lookup(msg)
+	var cacheKey string
+	for _, q := range msg.Question {
+		cacheKey += q.Name + ";"
+	}
+	res, err := p.dnsCache.Get(cacheKey)
+	if err == nil {
+		metrics.DNSCacheHit.With(prometheus.Labels{}).Inc()
+		return res, nil
+	}
+	if err != nil {
+		metrics.DNSCacheMiss.With(prometheus.Labels{}).Inc()
+	}
+	res, err = p.Lookup(msg)
 	if err != nil {
 		resultCode = metrics.ResultCodeError
+	}
+	err = p.dnsCache.Put(cacheKey, res)
+	if err != nil {
+		logger.Error(err, "unable to put dns cache")
 	}
 	return res, err
 }

@@ -13,7 +13,17 @@ type Cache struct {
 }
 
 func New(ctx context.Context) (*Cache, error) {
-	bc, err := bigcache.New(ctx, bigcache.DefaultConfig(time.Minute))
+	bc, err := bigcache.New(ctx, bigcache.Config{
+		Shards:             1024,
+		LifeWindow:         time.Minute,
+		CleanWindow:        30 * time.Second,
+		MaxEntriesInWindow: 1000 * 10 * 60,
+		MaxEntrySize:       500,
+		StatsEnabled:       false,
+		Verbose:            false,
+		HardMaxCacheSize:   0,
+		Logger:             bigcache.DefaultLogger(),
+	})
 	if err != nil {
 		return nil, err
 	}
